@@ -16,3 +16,4 @@ Vision Language Model from scratch, based on PaliGemma
 - [Github_Ytb](https://github.com/hkproj/pytorch-paligemma)
 - [paligemma-from-scratch](https://github.com/stojk/paligemma-from-scratch)
 - [huggingface-blog](https://huggingface.co/blog/paligemma)
+- [Youtube](https://www.youtube.com/watch?v=vAmKB7iPkWw&ab_channel=UmarJamil)

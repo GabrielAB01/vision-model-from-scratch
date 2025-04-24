@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from siglip.config import SiglipVisionConfig
+from siglip.attention import SiglipAttention
 
 
 class SiglipEncoder(nn.Module):

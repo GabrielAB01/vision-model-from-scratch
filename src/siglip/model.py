@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from siglip.config import SiglipVisionConfig
 from typing import Tuple
 import einops
 
+from siglip.config import SiglipVisionConfig
 from siglip.encoder import SiglipEncoder
 
 class SiglipVisionModel(nn.Module):

@@ -175,7 +175,6 @@ def main(
 	model = model.to(device).eval()
 
 	print("Loading processor...")
-	processor = PaliGemmaProcessor.from_pretrained(model_path)
 
 	num_image_tokens = model.config.vision_config.num_image_tokens
 	image_size = model.config.vision_config.image_size

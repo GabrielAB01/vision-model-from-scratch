@@ -116,7 +116,7 @@ class GemmaMLP(nn.Module):
 		
 		# [Batch_Size, Seq_Len, Hidden_Size] -> [Batch_Size, Seq_Len, Intermediate_Size]
 		y = self.gate_proj(x) 
-		y = torch.gelu(y, approximate="tanh")
+		y = nn.functional.gelu(y, approximate="tanh")
 
 		# [Batch_Size, Seq_Len, Hidden_Size] -> [Batch_Size, Seq_Len, Intermediate_Size]
 		j = self.up_proj(x)

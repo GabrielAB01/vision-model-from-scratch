@@ -4,6 +4,9 @@ import torch.nn as nn
 
 from typing import Tuple, Optional
 
+from utils.load_weights import _copy_weights
+
+
 class SiglipAttention(nn.Module):
 	"""
 		Multi-head self-attention module for the Siglip Vision Transformer.
@@ -95,6 +98,31 @@ class SiglipAttention(nn.Module):
 		attn_output = self.out_proj(attn_output)
 
 		return attn_output, attn_weights
+	
+	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+		"""
+			Chargement des poids Hugging Face dans la couche d'attention.
+			Args:
+				- hf_state  : state-dict Hugging Face déjà chargé en mémoire.
+				- layer_idx : index (0-based) de la couche d'attention dans l'encodeur.
+		"""
+
+		# Préfixe exact des clés HF pour cette couche d'attention
+		prefix = f"vision_tower.vision_model.encoder.layers.{layer_idx}.self_attn."
+
+		# Mapping 1-pour-1 (et biais inclus, même s’ils sont déjà identiques)
+		rename_map = {
+			"q_proj.weight": "q_proj.weight",
+			"k_proj.weight": "k_proj.weight",
+			"v_proj.weight": "v_proj.weight",
+			"out_proj.weight": "out_proj.weight",
+			"q_proj.bias": "q_proj.bias",
+			"k_proj.bias": "k_proj.bias",
+			"v_proj.bias": "v_proj.bias",
+			"out_proj.bias": "out_proj.bias",
+		}
+
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
 
 
 # Test attention

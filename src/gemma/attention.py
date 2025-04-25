@@ -4,6 +4,7 @@ from torch import nn
 from einops import rearrange, repeat
 
 from gemma.config import GemmaConfig
+from utils.load_weights import _copy_weights
 
 
 
@@ -159,6 +160,36 @@ class GemmaAttention(nn.Module):
 
 		
 		return attn_output, attn_weights
+	
+	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+		"""
+			Args
+			----
+			hf_state  : state-dict Hugging Face déjà en mémoire
+			layer_idx : index de la couche dans le modèle HF
+		"""
+		# Préfixe exact des clés Hugging Face pour cette couche
+		prefix = f"language_model.model.layers.{layer_idx}.self_attn."
+
+		# Table de renommage 1-pour-1 (clé HF relative -> clé locale)
+		rename_map = {
+			"q_proj.weight": "q_proj.weight",
+			"k_proj.weight": "k_proj.weight",
+			"v_proj.weight": "v_proj.weight",
+			"o_proj.weight": "o_proj.weight",
+		}
+
+		# Les biais n’existent que si `attention_bias=True`
+		if self.config.attention_bias:
+			rename_map.update({
+				"q_proj.bias": "q_proj.bias",
+				"k_proj.bias": "k_proj.bias",
+				"v_proj.bias": "v_proj.bias",
+				"o_proj.bias": "o_proj.bias",
+			})
+
+		# Copie effective
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
 
 
 

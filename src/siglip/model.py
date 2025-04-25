@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
-from typing import Tuple
 import einops
 
 from siglip.config import SiglipVisionConfig
 from siglip.encoder import SiglipEncoder
+
+from utils.load_weights import _copy_weights
 
 class SiglipVisionModel(nn.Module):
 	"""
@@ -38,6 +39,10 @@ class SiglipVisionModel(nn.Module):
 		"""
 		# [Batch_size, Channels, Height, Width] -> [Batch_size, Num_Patches, Embed_Dim]
 		return self.vision_model(pixel_values)
+	
+	def load_hf_weight(self, hf_state: dict):
+		# Tout le travail est délégué au transformer interne
+		self.vision_model.load_hf_weight(hf_state)
 	
 
 class SiglipVisionTransformer(nn.Module):
@@ -73,6 +78,23 @@ class SiglipVisionTransformer(nn.Module):
 		outputs = self.encoder(embeddings)
 		
 		return self.post_layernorm(outputs)
+	
+	def load_hf_weight(self, hf_state: dict):
+		# Charge les poids de Hugging Face pour le modèle Siglip Vision Transformer.
+
+		# 1) Embeddings (conv patch + positions)
+		self.embeddings.load_hf_weight(hf_state)
+
+		# 2) Encodeur (N couches)
+		self.encoder.load_hf_weight(hf_state)
+
+		# 3) LayerNorm final
+		_copy_weights(
+			self.post_layernorm,
+			hf_state,
+			{"weight": "weight", "bias": "bias"},
+			prefix_src="vision_tower.vision_model.post_layernorm.",
+		)
 	
 
 class SiglipVisionEmbeddings(nn.Module):
@@ -134,13 +156,28 @@ class SiglipVisionEmbeddings(nn.Module):
 
 		"""
 		# [Batch_size, Embed_Dim, Num_Patches_H, Num_Patches_W] -> [Batch_size, Embed_Dim, Num_Patches]
-        # where Num_Patches = Num_Patches_H * Num_Patches_W
-        embeddings = patch_embeds.flatten(2)
-        # [Batch_size, Embed_Dim, Num_Patches] -> [Batch_size, Num_Patches, Embed_Dim]
-        embeddings = embeddings.transpose(1, 2)
+		# where Num_Patches = Num_Patches_H * Num_Patches_W
+		embeddings = patch_embeds.flatten(2)
+		# [Batch_size, Embed_Dim, Num_Patches] -> [Batch_size, Num_Patches, Embed_Dim]
+		embeddings = embeddings.transpose(1, 2)
 		"""
 		# Add position embeddings to each patch. Each positional encoding is a vector of size [Embed_Dim]
 		embeddings = embeddings + self.position_embedding(self.position_ids)
 		
 		return embeddings
 
+	def load_hf_weight(self, hf_state: dict, prefix: str = "vision_tower.vision_model.embeddings."):
+		"""
+			Charge les poids de Hugging Face pour la partie embeddings du modèle.
+			Args:
+				hf_state (dict): État du modèle Hugging Face.
+				prefix (str): Préfixe pour les poids de cette partie.
+		"""
+
+		rename_map = {
+			"patch_embedding.weight": "patch_embedding.weight",
+			"patch_embedding.bias":   "patch_embedding.bias",
+			"position_embedding.weight": "position_embedding.weight",
+		}
+
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)

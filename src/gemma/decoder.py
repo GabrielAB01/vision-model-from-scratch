@@ -4,6 +4,7 @@ from typing import Optional
 
 from gemma.config import GemmaConfig
 from gemma.attention import KVCache, GemmaAttention
+from utils.load_weights import _copy_weights
 
 class GemmaDecoderLayer(nn.Module):
 	"""
@@ -62,6 +63,26 @@ class GemmaDecoderLayer(nn.Module):
 		hidden_states = hidden_states + residual
 
 		return hidden_states
+	
+	def load_hf_weight(self, hf_state, layer_idx: int):
+		"""
+		Charge récursivement les poids du modèle Hugging Face dans la couche.
+		Args:
+			hf_state (dict): État du modèle Hugging Face.
+			layer_idx (int): Index de la couche.
+		"""
+		# 1) Attention
+		self.self_attn.load_hf_weight(hf_state, layer_idx)
+
+		# 2) MLP
+		self.mlp.load_hf_weight(hf_state, layer_idx)
+
+		# 3) RMSNorms
+		prefix = f"language_model.model.layers.{layer_idx}."
+		self.input_layernorm.load_hf_weight(hf_state, prefix + "input_layernorm.")
+		self.post_attention_layernorm.load_hf_weight(hf_state, prefix + "post_attention_layernorm.")
+	
+
 
 
 
@@ -87,6 +108,24 @@ class GemmaRMSNorm(nn.Module):
 		output = self._norm(x.float())
 		output = output * (1.0 + self.weight.float())
 		return output.type_as(x)
+	
+	# Old function
+	def _load_hf_weight(self, hf_state, layer_idx: int, which: str):
+		"""
+		layer_idx : index de la couche (0-based)
+		which     : "input_layernorm." ou "post_attention_layernorm."
+		"""
+		prefix = f"language_model.model.layers.{layer_idx}.{which}"
+		rename_map = {"weight": "weight"}
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
+
+	def load_hf_weight(self, hf_state, prefix: str):
+		"""
+		layer_idx : index de la couche (0-based)
+		prefix    : préfixe huggingface complet
+		"""
+		rename_map = {"weight": "weight"}
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
 	
 	
 class GemmaMLP(nn.Module):
@@ -127,4 +166,13 @@ class GemmaMLP(nn.Module):
 
 		# return self.down_proj(nn.functional.gelu(self.gate_proj(x), approximate="tanh") * self.up_proj(x))
 		return z
+	
+	def load_hf_weight(self, hf_state, layer_idx: int):
+		prefix = f"language_model.model.layers.{layer_idx}.mlp."
+		rename_map = {
+			"gate_proj.weight": "gate_proj.weight",
+			"up_proj.weight"  : "up_proj.weight",
+			"down_proj.weight": "down_proj.weight",
+		}
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
 	

@@ -1,7 +1,3 @@
-import sys
-import os
-
-
 from PIL import Image
 import torch
 import fire

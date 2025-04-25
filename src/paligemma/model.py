@@ -9,6 +9,8 @@ from paligemma.config import PaliGemmaConfig
 from gemma.attention import KVCache
 from gemma.model import GemmaForCausalLM
 
+from utils.load_weights import _copy_weights
+
 
 class PaliGemmaForConditionalGeneration(nn.Module):
 	"""
@@ -184,6 +186,22 @@ class PaliGemmaForConditionalGeneration(nn.Module):
 		)
 
 		return outputs
+	
+
+	def load_hf_weight(self, hf_state, prefix_src=""):
+		"""
+			Charge les poids du modèle à partir d'un dictionnaire d'état Hugging Face.
+		"""
+		# 1) Branche vision (SigLIP)
+		self.vision_tower.load_hf_weight(hf_state)
+
+		# 2) Projecteur multimodal
+		self.multi_modal_projector.load_hf_weight(hf_state)
+
+		# 3) Branche texte (Gemma)
+		self.language_model.load_hf_weight(hf_state)
+
+
 
 class PaliGemmaMultiModalProjector(nn.Module):
 	"""
@@ -207,3 +225,11 @@ class PaliGemmaMultiModalProjector(nn.Module):
 		# [Batch_Size, Num_Patches, Hidden_Size] -> [Batch_Size, Num_Patches, Projection_Dim]
 		hidden_states = self.linear(image_features)
 		return hidden_states
+	
+	def load_hf_weight(self, hf_state):
+		prefix = "multi_modal_projector."
+		rename_map = {
+			"linear.weight": "linear.weight",
+			"linear.bias": "linear.bias",
+		}
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)

@@ -3,6 +3,8 @@ import torch.nn as nn
 from siglip.config import SiglipVisionConfig
 from siglip.attention import SiglipAttention
 
+from utils.load_weights import _copy_weights
+
 
 class SiglipEncoder(nn.Module):
 	"""
@@ -36,6 +38,16 @@ class SiglipEncoder(nn.Module):
 			hidden_states = layer(hidden_states)
 		
 		return hidden_states
+	
+	def load_hf_weight(self, hf_state: dict, prefix: str = "vision_tower.vision_model.encoder."):
+		"""
+			Chargement récursif des poids Hugging Face dans l’encodeur SigLIP.
+			Args:
+				hf_state : state-dict Hugging Face.
+				prefix   : préfixe (non utilisé ici mais conservé pour homogénéité).
+		"""
+		for idx, layer in enumerate(self.layers):
+			layer.load_hf_weight(hf_state, idx)
 
 
 class SiglipEncoderLayer(nn.Module):
@@ -79,19 +91,72 @@ class SiglipEncoderLayer(nn.Module):
 		hidden_states = residual + hidden_states
 		return hidden_states 
 
+	
+	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+		"""
+			Chargement des poids Hugging Face dans une couche de l’encodeur SigLIP.
+			Args:
+				hf_state  : state-dict Hugging Face déjà présent en mémoire.
+				layer_idx : index (0-based) de la couche dans l’encodeur SigLIP.
+		"""
+
+		# 1) Attention
+		self.self_attn.load_hf_weight(hf_state, layer_idx)
+
+		# 2) MLP
+		self.mlp.load_hf_weight(hf_state, layer_idx)
+
+		# 3) LayerNorm1
+		prefix = f"vision_tower.vision_model.encoder.layers.{layer_idx}."
+		_copy_weights(
+			self.layer_norm1,
+			hf_state,
+			{"weight": "weight", "bias": "bias"},
+			prefix_src=prefix + "layer_norm1.",
+		)
+
+		# 4) LayerNorm2
+		_copy_weights(
+			self.layer_norm2,
+			hf_state,
+			{"weight": "weight", "bias": "bias"},
+			prefix_src=prefix + "layer_norm2.",
+		)
+
 
 class SiglipMLP(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
-        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
+	def __init__(self, config):
+		super().__init__()
+		self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
+		self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.fc1(hidden_states) # [Batch_Size, Num_Patches, Intermediate_Size]
+	def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+		hidden_states = self.fc1(hidden_states) # [Batch_Size, Num_Patches, Intermediate_Size]
 
 		# Activation function : GELU
-        hidden_states = nn.functional.gelu(hidden_states, approximate="tanh")
+		hidden_states = nn.functional.gelu(hidden_states, approximate="tanh")
 		
-        hidden_states = self.fc2(hidden_states) # [Batch_Size, Num_Patches, Embed_Dim]
+		hidden_states = self.fc2(hidden_states) # [Batch_Size, Num_Patches, Embed_Dim]
 
-        return hidden_states
+		return hidden_states
+	
+	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+		"""
+			Chargement des poids Hugging Face dans une couche MLP de l'encodeur SigLIP.
+			Args:
+				hf_state  : state-dict Hugging Face déjà présent en mémoire.
+				layer_idx : index (0-based) de la couche SigLIP dans l'encodeur.
+		"""
+
+		# Préfixe exact des clés HF de cette couche MLP
+		prefix = f"vision_tower.vision_model.encoder.layers.{layer_idx}.mlp."
+
+		# Mapping 1-pour-1, biais inclus
+		rename_map = {
+			"fc1.weight": "fc1.weight",
+			"fc1.bias":   "fc1.bias",
+			"fc2.weight": "fc2.weight",
+			"fc2.bias":   "fc2.bias",
+		}
+
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)

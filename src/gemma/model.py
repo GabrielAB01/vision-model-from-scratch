@@ -6,6 +6,7 @@ from typing import Optional, Tuple
 from gemma.config import GemmaConfig
 from gemma.decoder import GemmaDecoderLayer, GemmaRMSNorm
 from gemma.attention import KVCache
+from utils.load_weights import _copy_weights
 
 	
 class GemmaForCausalLM(nn.Module):
@@ -72,8 +73,18 @@ class GemmaForCausalLM(nn.Module):
 			return_data["kv_cache"] = kv_cache
 
 		return return_data
+	
+	def load_hf_weight(self, hf_state):
+		# Sous-modèle (transformer)
+		self.model.load_hf_weight(hf_state)
 
-
+		# Tête LM (optionnelle, sinon tie_weights se chargera de la recopier)
+		_copy_weights(
+			self.lm_head,
+			hf_state,
+			{"weight": "weight"},
+			prefix_src="language_model.lm_head."
+		)
 
 class GemmaModel(nn.Module):
 	"""
@@ -126,3 +137,22 @@ class GemmaModel(nn.Module):
 
 		# [Batch_Size, Seq_Len, Hidden_Size]
 		return hidden_states
+	
+	def load_hf_weight(self, hf_state):
+		# 1. embeddings
+		_copy_weights(
+			self.embed_tokens,
+			hf_state,
+			{"weight": "weight"},
+			prefix_src="language_model.model.embed_tokens."
+		)
+
+		# 2. chaque couche du décodeur
+		for idx, layer in enumerate(self.layers):
+			layer.load_hf_weight(hf_state, idx)
+
+		# 3. RMSNorm final
+		self.norm.load_hf_weight(
+			hf_state,
+			prefix="language_model.model.norm."
+		)

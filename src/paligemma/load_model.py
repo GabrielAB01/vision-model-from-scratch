@@ -4,7 +4,10 @@ from paligemma.config import PaliGemmaConfig
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 from safetensors import safe_open
-from typing import Tuple
+
+from collections import OrderedDict
+import re, warnings
+import torch.nn as nn
 
 import os
 import json
@@ -35,11 +38,11 @@ def load_hf_model(
 	safetensors_files = glob.glob(os.path.join(model_dir, "*.safetensors"))
 
 	# Charger tous les fichiers safetensors dans un dictionnaire
-	tensors = {}
+	hf_state_dict = {}
 	for safetensors_file in safetensors_files:
 		with safe_open(safetensors_file, framework="pt", device="cpu") as f:
 			for key in f.keys():
-				tensors[key] = f.get_tensor(key) 
+				hf_state_dict[key] = f.get_tensor(key) 
 	
 	# Charger la configuration du modèle
 	with open(os.path.join(model_dir, "config.json"), "r") as f:
@@ -50,7 +53,8 @@ def load_hf_model(
 	model = PaliGemmaForConditionalGeneration(config).to(device)
 
 	# Charger les poids du modèle
-	model.load_state_dict(tensors, strict=False)
+	# model.load_state_dict(hf_state_dict, strict=False)
+	model.load_hf_weight(hf_state_dict)
 
 	# Lier les poids du modèle de langage avec ceux de l'encodeur
 	model.tie_weights()

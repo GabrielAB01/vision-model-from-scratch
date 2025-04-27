@@ -100,6 +100,28 @@ class PaliGemmaProcessor:
 
 		return return_data
 
+	def batch_decode(
+        self,
+        sequences: Union[torch.Tensor, List[List[int]]],
+        skip_special_tokens: bool = True
+    ) -> List[str]:
+		"""
+		Décode une batch de séquences de tokens en chaînes de caractères.
+		Args:
+			sequences: Tensor [B, L] ou liste de listes d’ids de tokens.
+			skip_special_tokens: si True, supprime les tokens spéciaux (bos, eos, image…).
+		Returns:
+			List[str]: textes décodés.
+		"""
+	# Si c’est un tensor, on convertit en liste
+		if isinstance(sequences, torch.Tensor):
+			sequences = sequences.cpu().tolist()
+		# On se repose sur la méthode du tokenizer
+		return self.tokenizer.batch_decode(
+			sequences,
+			skip_special_tokens=skip_special_tokens
+		)
+
 
 
 

@@ -9,6 +9,7 @@ from typing import Tuple
 import os
 import json
 import glob
+import torch
 
 def _ensure_local(model_path: str):
 	"""Si `model_path` est un repo HF, télécharge-le et renvoie le dossier local."""

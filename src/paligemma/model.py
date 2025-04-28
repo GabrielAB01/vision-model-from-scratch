@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from typing import Optional, Tuple
 from einops import rearrange, repeat
+import os
+import json
 
 from siglip.model import SiglipVisionModel
 from paligemma.config import PaliGemmaConfig
@@ -9,7 +11,7 @@ from paligemma.config import PaliGemmaConfig
 from gemma.attention import KVCache
 from gemma.model import GemmaForCausalLM
 
-from utils.load_weights import _copy_weights
+import torch.nn.functional as F
 
 
 class PaliGemmaForConditionalGeneration(nn.Module):
@@ -105,6 +107,7 @@ class PaliGemmaForConditionalGeneration(nn.Module):
 		# Ajouter les embeddings d'image
 		# On ne peut pas utiliser `torch.where` ici car les dimensions ne correspondent pas
 		# La longueur de scaled_image_features n'est pas égale à la longueur de l'embedding final
+		scaled_image_features = scaled_image_features.to(final_embedding.dtype)
 		final_embedding = final_embedding.masked_scatter(image_mask, scaled_image_features)
 		# Ajouter les embeddings de padding
 		final_embedding = torch.where(padding_mask, torch.zeros_like(final_embedding), final_embedding)
@@ -186,22 +189,94 @@ class PaliGemmaForConditionalGeneration(nn.Module):
 		)
 
 		return outputs
-	
 
-	def load_hf_weight(self, hf_state, prefix_src=""):
+	@torch.inference_mode()
+	def generate(
+		self,
+		input_ids: torch.LongTensor,
+		attention_mask: torch.LongTensor,
+		pixel_values: torch.FloatTensor,
+		max_new_tokens: int = 100,
+		do_sample: bool = False
+	) -> torch.LongTensor:
 		"""
-			Charge les poids du modèle à partir d'un dictionnaire d'état Hugging Face.
+		Génération auto‐régressive à base d’image + texte.
+		Args:
+			input_ids: Tensor [B, T] des ids de tokens d’amorçage.
+			attention_mask: Tensor [B, T] (1 = token actif).
+			pixel_values: Tensor [B, C, H, W] des images.
+			max_new_tokens: nombre de tokens à générer.
+			do_sample: si True, échantillonne, sinon greedy.
+		Returns:
+			Tensor [B, T + max_new_tokens] des ids générés.
 		"""
-		# 1) Branche vision (SigLIP)
-		self.vision_tower.load_hf_weight(hf_state)
+		device = next(self.parameters()).device
+		# On met tout sur le bon device
+		input_ids = input_ids.to(device)
+		attention_mask = attention_mask.to(device)
+		pixel_values = pixel_values.to(device)
 
-		# 2) Projecteur multimodal
-		self.multi_modal_projector.load_hf_weight(hf_state)
+		generated = input_ids
+		cur_mask = attention_mask
 
-		# 3) Branche texte (Gemma)
-		self.language_model.load_hf_weight(hf_state)
+		for _ in range(max_new_tokens):
+			# passe par votre forward qui mixe texte+images
+			outputs = self(
+				input_ids=generated,
+				attention_mask=cur_mask,
+				pixel_values=pixel_values
+			)
+			# logits: [B, seq_len, vocab_size]
+			logits = outputs.logits
+			next_logits = logits[:, -1, :]  # on ne s’intéresse qu’au dernier pas
 
+			if do_sample:
+				probs = F.softmax(next_logits, dim=-1)
+				next_token = torch.multinomial(probs, num_samples=1)
+			else:
+				next_token = next_logits.argmax(dim=-1, keepdim=True)
 
+			# on concatène le nouveau token
+			generated = torch.cat([generated, next_token], dim=1)
+			# on met à jour le mask (1 = actif)
+			cur_mask = torch.cat(
+				[cur_mask, torch.ones((cur_mask.size(0), 1), device=device, dtype=cur_mask.dtype)],
+				dim=1
+			)
+
+			# (optionnel) on pourrait arrêter si tous les tokens sont égaux à eos_token_id
+			# if (next_token == self.config.eos_token_id).all(): break
+
+		return generated
+
+	def save_pretrained(self, save_directory: str):
+		"""
+		Save the model weights and configuration to a directory.
+		
+		Args:
+		    save_directory (str): Directory to save the model to
+		"""
+		# Create the directory if it doesn't exist
+		os.makedirs(save_directory, exist_ok=True)
+		
+		# Save the model configuration
+		config_dict = {
+			'vision_config': self.config.vision_config.__dict__,
+			'text_config': self.config.text_config.__dict__,
+			'ignore_index': self.config.ignore_index,
+			'image_token_index': self.config.image_token_index,
+			'vocab_size': self.config.vocab_size,
+			'projection_dim': self.config.projection_dim,
+			'hidden_size': self.config.hidden_size,
+			'pad_token_id': self.config.pad_token_id
+		}
+		
+		with open(os.path.join(save_directory, 'config.json'), 'w') as f:
+			json.dump(config_dict, f)
+		
+		# Save the model weights
+		model_state = self.state_dict()
+		torch.save(model_state, os.path.join(save_directory, 'pytorch_model.bin'))
 
 class PaliGemmaMultiModalProjector(nn.Module):
 	"""
@@ -225,11 +300,3 @@ class PaliGemmaMultiModalProjector(nn.Module):
 		# [Batch_Size, Num_Patches, Hidden_Size] -> [Batch_Size, Num_Patches, Projection_Dim]
 		hidden_states = self.linear(image_features)
 		return hidden_states
-	
-	def load_hf_weight(self, hf_state):
-		prefix = "multi_modal_projector."
-		rename_map = {
-			"linear.weight": "linear.weight",
-			"linear.bias": "linear.bias",
-		}
-		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)

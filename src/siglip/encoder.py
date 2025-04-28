@@ -6,9 +6,9 @@ from siglip.attention import SiglipAttention
 from utils.load_weights import _copy_weights
 
 
-class SiglipEncoder(nn.Module):
+class VisionEncoder(nn.Module):
 	"""
-		Implementation of the Siglip Encoder Stack.
+		Implementation of the Vision Encoder Stack.
 
 		Args:
 			- config (SiglipVisionConfig): Configuration object for the model.
@@ -17,7 +17,7 @@ class SiglipEncoder(nn.Module):
 		super().__init__()
 		self.config = config
 		self.layers = nn.ModuleList([
-			SiglipEncoderLayer(config)
+			VisionEncoderLayer(config)
 			for _ in range(config.num_hidden_layers)
 		])
 
@@ -39,18 +39,19 @@ class SiglipEncoder(nn.Module):
 		
 		return hidden_states
 	
-	def load_hf_weight(self, hf_state: dict, prefix: str = "vision_tower.vision_model.encoder."):
+	def load_hf_weight(self, hf_state: dict, pbar=None):
 		"""
-			Chargement récursif des poids Hugging Face dans l’encodeur SigLIP.
+			Chargement récursif des poids Hugging Face dans l'encodeur SigLIP.
 			Args:
 				hf_state : state-dict Hugging Face.
-				prefix   : préfixe (non utilisé ici mais conservé pour homogénéité).
+				pbar     : barre de progression (optionnelle).
 		"""
 		for idx, layer in enumerate(self.layers):
-			layer.load_hf_weight(hf_state, idx)
+			layer.load_hf_weight(hf_state, idx, pbar=pbar)
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")
 
 
-class SiglipEncoderLayer(nn.Module):
+class VisionEncoderLayer(nn.Module):
 	"""
 		Implementation of a single Siglip Encoder Layer.
 
@@ -61,7 +62,13 @@ class SiglipEncoderLayer(nn.Module):
 		super().__init__()
 		self.embed_dim = config.hidden_size
 		self.self_attn = SiglipAttention(config)
-		self.mlp = SiglipMLP(config)
+		# self.mlp = MLP(config)
+		# Ne plus utiliser MLP, définir directement la séquence
+		self.feed_forward = nn.Sequential(
+			nn.Linear(config.hidden_size, config.intermediate_size),
+			nn.GELU(approximate="tanh"),
+			nn.Linear(config.intermediate_size, config.hidden_size),
+		)
 
 		self.layer_norm1 = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_eps)
 		self.layer_norm2 = nn.LayerNorm(self.embed_dim, eps=config.layer_norm_eps)
@@ -85,27 +92,38 @@ class SiglipEncoderLayer(nn.Module):
 		residual = hidden_states
 
 		# Feed-forward (and layer normalization) sublayer
-		hidden_states = self.mlp(self.layer_norm2(hidden_states))
+		# hidden_states = self.mlp(self.layer_norm2(hidden_states))
+		hidden_states = self.feed_forward(self.layer_norm2(hidden_states))
 		
 		# Add residual connection
 		hidden_states = residual + hidden_states
 		return hidden_states 
 
 	
-	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+	def load_hf_weight(self, hf_state: dict, layer_idx: int, pbar=None):
 		"""
 			Chargement des poids Hugging Face dans une couche de l’encodeur SigLIP.
 			Args:
 				hf_state  : state-dict Hugging Face déjà présent en mémoire.
 				layer_idx : index (0-based) de la couche dans l’encodeur SigLIP.
-		"""
+				pbar      : barre de progression (optionnelle).
+			"""
 
 		# 1) Attention
-		self.self_attn.load_hf_weight(hf_state, layer_idx)
-
-		# 2) MLP
-		self.mlp.load_hf_weight(hf_state, layer_idx)
-
+		self.self_attn.load_hf_weight(hf_state, layer_idx, pbar=pbar)
+		# 2) Feed-forward : faire le mapping de l'architecture HF vers notre architecture
+		_copy_weights(
+			self.feed_forward,
+			hf_state,
+			{
+				"fc1.weight": "0.weight",
+				"fc1.bias": "0.bias",
+				"fc2.weight": "2.weight",
+			 	"fc2.bias": "2.bias"
+			},
+			prefix_src=f"vision_tower.vision_model.encoder.layers.{layer_idx}.mlp.",
+			pbar=pbar
+		)
 		# 3) LayerNorm1
 		prefix = f"vision_tower.vision_model.encoder.layers.{layer_idx}."
 		_copy_weights(
@@ -113,6 +131,7 @@ class SiglipEncoderLayer(nn.Module):
 			hf_state,
 			{"weight": "weight", "bias": "bias"},
 			prefix_src=prefix + "layer_norm1.",
+			pbar=pbar
 		)
 
 		# 4) LayerNorm2
@@ -121,10 +140,13 @@ class SiglipEncoderLayer(nn.Module):
 			hf_state,
 			{"weight": "weight", "bias": "bias"},
 			prefix_src=prefix + "layer_norm2.",
+			pbar=pbar
 		)
 
-
-class SiglipMLP(nn.Module):
+#------------------------------------------------------------------
+# Classe MLP : Plus utilisée dans le modèle SigLIP, remplacée par nn.Sequential dans VisionEncoderLayer
+#------------------------------------------------------------------
+class MLP(nn.Module):
 	def __init__(self, config):
 		super().__init__()
 		self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -140,12 +162,13 @@ class SiglipMLP(nn.Module):
 
 		return hidden_states
 	
-	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+	def load_hf_weight(self, hf_state: dict, layer_idx: int, pbar=None):
 		"""
 			Chargement des poids Hugging Face dans une couche MLP de l'encodeur SigLIP.
 			Args:
 				hf_state  : state-dict Hugging Face déjà présent en mémoire.
 				layer_idx : index (0-based) de la couche SigLIP dans l'encodeur.
+				pbar      : barre de progression (optionnelle).
 		"""
 
 		# Préfixe exact des clés HF de cette couche MLP
@@ -159,4 +182,4 @@ class SiglipMLP(nn.Module):
 			"fc2.bias":   "fc2.bias",
 		}
 
-		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix, pbar=pbar)

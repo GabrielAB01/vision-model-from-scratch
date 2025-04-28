@@ -74,17 +74,10 @@ class GemmaForCausalLM(nn.Module):
 
 		return return_data
 	
-	def load_hf_weight(self, hf_state):
+	def load_hf_weight(self, hf_state, pbar=None):
 		# Sous-modèle (transformer)
-		self.model.load_hf_weight(hf_state)
-
-		# Tête LM (optionnelle, sinon tie_weights se chargera de la recopier)
-		_copy_weights(
-			self.lm_head,
-			hf_state,
-			{"weight": "weight"},
-			prefix_src="language_model.lm_head."
-		)
+		self.model.load_hf_weight(hf_state, pbar=pbar)
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")
 
 class GemmaModel(nn.Module):
 	"""
@@ -138,21 +131,24 @@ class GemmaModel(nn.Module):
 		# [Batch_Size, Seq_Len, Hidden_Size]
 		return hidden_states
 	
-	def load_hf_weight(self, hf_state):
+	def load_hf_weight(self, hf_state, pbar=None):
 		# 1. embeddings
 		_copy_weights(
 			self.embed_tokens,
 			hf_state,
 			{"weight": "weight"},
-			prefix_src="language_model.model.embed_tokens."
+			prefix_src="language_model.model.embed_tokens.",
+			pbar=pbar
 		)
 
 		# 2. chaque couche du décodeur
 		for idx, layer in enumerate(self.layers):
-			layer.load_hf_weight(hf_state, idx)
+			layer.load_hf_weight(hf_state, idx, pbar=pbar)
 
 		# 3. RMSNorm final
 		self.norm.load_hf_weight(
 			hf_state,
-			prefix="language_model.model.norm."
+			prefix="language_model.model.norm.",
+			pbar=pbar
 		)
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")

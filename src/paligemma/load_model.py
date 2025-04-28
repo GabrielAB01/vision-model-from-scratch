@@ -4,7 +4,7 @@ from paligemma.config import PaliGemmaConfig
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 from safetensors import safe_open
-from typing import Tuple
+from tqdm.auto import tqdm
 
 import os
 import json
@@ -44,7 +44,7 @@ def load_hf_model(
 			bin_tensors = torch.load(bin_path, map_location="cpu")
 			tensors.update(bin_tensors)
 	
-    # Charger la configuration du modèle
+	# Charger la configuration du modèle
 	with open(os.path.join(model_dir, "config.json"), "r") as f:
 		cfg_dict = json.load(f)
 	# Éviter de passer deux fois pad_token_id à GemmaConfig
@@ -56,7 +56,13 @@ def load_hf_model(
 	model = PaliGemmaForConditionalGeneration(config).to(device)
 
 	# Charger les poids du modèle
-	model.load_state_dict(tensors, strict=False)
+	# model.load_state_dict(tensors, strict=False)
+	total_keys = len(tensors)               # ≈ nombre de tensors à copier
+	with tqdm(total=total_keys,
+			  desc="Loading weights",
+			  unit=" tensors",
+			) as pbar:
+		model.load_hf_weight(tensors, pbar=pbar)
 
 	# Lier les poids du modèle de langage avec ceux de l'encodeur
 	model.tie_weights()

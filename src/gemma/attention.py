@@ -161,12 +161,13 @@ class GemmaAttention(nn.Module):
 		
 		return attn_output, attn_weights
 	
-	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+	def load_hf_weight(self, hf_state: dict, layer_idx: int, pbar=None):
 		"""
 			Args
 			----
 			hf_state  : state-dict Hugging Face déjà en mémoire
 			layer_idx : index de la couche dans le modèle HF
+			pbar      : barre de progression (optionnelle)
 		"""
 		# Préfixe exact des clés Hugging Face pour cette couche
 		prefix = f"language_model.model.layers.{layer_idx}.self_attn."
@@ -189,7 +190,7 @@ class GemmaAttention(nn.Module):
 			})
 
 		# Copie effective
-		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix, pbar=pbar)
 
 
 

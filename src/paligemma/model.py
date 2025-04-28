@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 from typing import Optional, Tuple
 from einops import rearrange, repeat
 import os
@@ -11,7 +12,8 @@ from paligemma.config import PaliGemmaConfig
 from gemma.attention import KVCache
 from gemma.model import GemmaForCausalLM
 
-import torch.nn.functional as F
+from utils.load_weights import _copy_weights
+
 
 
 class PaliGemmaForConditionalGeneration(nn.Module):
@@ -278,6 +280,24 @@ class PaliGemmaForConditionalGeneration(nn.Module):
 		model_state = self.state_dict()
 		torch.save(model_state, os.path.join(save_directory, 'pytorch_model.bin'))
 
+	
+
+	def load_hf_weight(self, hf_state, pbar=None):
+		"""
+			Charge les poids du modèle à partir d'un dictionnaire d'état Hugging Face.
+		"""
+		# 1) Branche vision (SigLIP)
+		self.vision_tower.load_hf_weight(hf_state, pbar=pbar)
+
+		# 2) Projecteur multimodal
+		self.multi_modal_projector.load_hf_weight(hf_state, pbar=pbar)
+
+		# 3) Branche texte (Gemma)
+		self.language_model.load_hf_weight(hf_state, pbar=pbar)
+
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")
+
+
 class PaliGemmaMultiModalProjector(nn.Module):
 	"""
 		Implémentation du projecteur multi-modal pour le modèle PaliGemma.
@@ -300,3 +320,12 @@ class PaliGemmaMultiModalProjector(nn.Module):
 		# [Batch_Size, Num_Patches, Hidden_Size] -> [Batch_Size, Num_Patches, Projection_Dim]
 		hidden_states = self.linear(image_features)
 		return hidden_states
+	
+	def load_hf_weight(self, hf_state, pbar=None):
+		prefix = "multi_modal_projector."
+		rename_map = {
+			"linear.weight": "linear.weight",
+			"linear.bias": "linear.bias",
+		}
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix, pbar=pbar)
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")

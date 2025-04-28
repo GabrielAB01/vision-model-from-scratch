@@ -3,7 +3,7 @@ import torch.nn as nn
 import einops
 
 from siglip.config import SiglipVisionConfig
-from siglip.encoder import SiglipEncoder
+from siglip.encoder import VisionEncoder
 
 from utils.load_weights import _copy_weights
 
@@ -25,7 +25,7 @@ class SiglipVisionModel(nn.Module):
 		# and initialize the model with the given configuration
 		super().__init__()
 		self.config = config
-		self.vision_model = SiglipVisionTransformer(config)  # Initialize the vision model with the config
+		self.vision_model = VisionTransformer(config)  # Initialize the vision model with the config
 
 	def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
 		"""
@@ -40,12 +40,13 @@ class SiglipVisionModel(nn.Module):
 		# [Batch_size, Channels, Height, Width] -> [Batch_size, Num_Patches, Embed_Dim]
 		return self.vision_model(pixel_values)
 	
-	def load_hf_weight(self, hf_state: dict):
+	def load_hf_weight(self, hf_state: dict, pbar=None):
 		# Tout le travail est délégué au transformer interne
-		self.vision_model.load_hf_weight(hf_state)
+		self.vision_model.load_hf_weight(hf_state, pbar=pbar)
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")
 	
 
-class SiglipVisionTransformer(nn.Module):
+class VisionTransformer(nn.Module):
 	"""
 		Implementation of the Siglip Vision Transformer.
 
@@ -57,7 +58,7 @@ class SiglipVisionTransformer(nn.Module):
 		self.config = config
 
 		self.embeddings = SiglipVisionEmbeddings(config)
-		self.encoder = SiglipEncoder(config)
+		self.encoder = VisionEncoder(config)
 		self.post_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 	
 	
@@ -79,14 +80,13 @@ class SiglipVisionTransformer(nn.Module):
 		
 		return self.post_layernorm(outputs)
 	
-	def load_hf_weight(self, hf_state: dict):
+	def load_hf_weight(self, hf_state: dict, pbar=None):
 		# Charge les poids de Hugging Face pour le modèle Siglip Vision Transformer.
 
 		# 1) Embeddings (conv patch + positions)
-		self.embeddings.load_hf_weight(hf_state)
-
+		self.embeddings.load_hf_weight(hf_state, pbar=pbar)
 		# 2) Encodeur (N couches)
-		self.encoder.load_hf_weight(hf_state)
+		self.encoder.load_hf_weight(hf_state, pbar=pbar)
 
 		# 3) LayerNorm final
 		_copy_weights(
@@ -94,7 +94,9 @@ class SiglipVisionTransformer(nn.Module):
 			hf_state,
 			{"weight": "weight", "bias": "bias"},
 			prefix_src="vision_tower.vision_model.post_layernorm.",
+			pbar=pbar,
 		)
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")
 	
 
 class SiglipVisionEmbeddings(nn.Module):
@@ -166,13 +168,14 @@ class SiglipVisionEmbeddings(nn.Module):
 		
 		return embeddings
 
-	def load_hf_weight(self, hf_state: dict, prefix: str = "vision_tower.vision_model.embeddings."):
+	def load_hf_weight(self, hf_state: dict, pbar=None):
 		"""
 			Charge les poids de Hugging Face pour la partie embeddings du modèle.
 			Args:
 				hf_state (dict): État du modèle Hugging Face.
-				prefix (str): Préfixe pour les poids de cette partie.
+				pbar: Barre de progression optionnelle.
 		"""
+		prefix = "vision_tower.vision_model.embeddings."
 
 		rename_map = {
 			"patch_embedding.weight": "patch_embedding.weight",
@@ -180,4 +183,5 @@ class SiglipVisionEmbeddings(nn.Module):
 			"position_embedding.weight": "position_embedding.weight",
 		}
 
-		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix, pbar=pbar)
+		print(f"[INFO] Poids importés pour {self.__class__.__name__}")

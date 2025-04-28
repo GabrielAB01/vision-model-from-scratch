@@ -99,12 +99,13 @@ class SiglipAttention(nn.Module):
 
 		return attn_output, attn_weights
 	
-	def load_hf_weight(self, hf_state: dict, layer_idx: int):
+	def load_hf_weight(self, hf_state: dict, layer_idx: int, pbar=None):
 		"""
 			Chargement des poids Hugging Face dans la couche d'attention.
 			Args:
 				- hf_state  : state-dict Hugging Face déjà chargé en mémoire.
 				- layer_idx : index (0-based) de la couche d'attention dans l'encodeur.
+				- pbar      : barre de progression optionnelle.
 		"""
 
 		# Préfixe exact des clés HF pour cette couche d'attention
@@ -122,7 +123,7 @@ class SiglipAttention(nn.Module):
 			"out_proj.bias": "out_proj.bias",
 		}
 
-		_copy_weights(self, hf_state, rename_map, prefix_src=prefix)
+		_copy_weights(self, hf_state, rename_map, prefix_src=prefix, pbar=pbar)
 
 
 # Test attention
@@ -148,4 +149,3 @@ if __name__ == "__main__":
 	output, attn_weights = attn(hidden_states)
 	print("Attention output shape:", output.shape)  # Should be [batch_size, seq_len_1, dim_model]
 	print(output)
-	

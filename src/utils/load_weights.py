@@ -5,12 +5,13 @@ import torch.nn as nn
 # Utilitaire minimal : copie (et renomme) les tenseurs d’un state-dict HF vers  #
 # un module PyTorch.                                                            #
 # ----------------------------------------------------------------------------- #
-def _copy_weights(module: nn.Module, hf_state: dict, rename_map: dict, prefix_src=""):
+def _copy_weights(module: nn.Module, hf_state: dict, rename_map: dict, prefix_src="", pbar=None):
     """
         module      : nn.Module local à remplir
         hf_state    : dict[str, Tensor] - state-dict Hugging Face déjà chargé
         rename_map  : dict[str, str]    - {'clé_relative_HF': 'clé_locale'}
         prefix_src  : préfixe Hugging Face à écarter (ex : "…layers.0.self_attn.")
+        pbar        : barre de progression optionnelle
     """
     renamed = OrderedDict()
     for old_key, new_key in rename_map.items():
@@ -19,6 +20,10 @@ def _copy_weights(module: nn.Module, hf_state: dict, rename_map: dict, prefix_sr
             print(f"[load_hf] clé manquante : {full_hf_key} - {old_key} -> {new_key}")
             continue
         renamed[new_key] = hf_state[full_hf_key]
+    
+    # Update la barre de progression
+    if pbar is not None:
+        pbar.update(len(renamed))
 
     # strict=False = on laisse PyTorch signaler ce qu’il manque / en trop
     missing, unexpected = module.load_state_dict(renamed, strict=False)
